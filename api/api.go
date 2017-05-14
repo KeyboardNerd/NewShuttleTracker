@@ -1,4 +1,4 @@
-package YAST
+package api
 
 import (
 	"encoding/json"
@@ -7,100 +7,14 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/keyboardnerd/yastserver/pkg"
 )
 
 const (
 	ERROR = "error"
 	OK    = "ok"
 )
-
-type ResStat struct {
-	Response string `json:"_stat"`
-	Info     string `json:"_info"`
-}
-
-type Context struct {
-	DB Database
-}
-
-type ApiVector struct {
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Angle float64 `json:"angle"`
-	Speed float64 `json:"speed"`
-}
-
-type ApiShuttleLog struct {
-	ResStat
-
-	VehicleID string    `json:"id"`
-	Location  ApiVector `json:"location"`
-	Status    string    `json:"stat"`
-}
-
-type ApiClosedRoute struct {
-	ResStat
-
-	Locations []ApiVector `json:"location"`
-	Name      string      `json:"name"`
-}
-
-func Stat(status, information string) []byte {
-	em, err := json.Marshal(ResStat{status, information})
-	if err != nil {
-		panic("server broken")
-	}
-	return em
-}
-
-func (ar *ApiClosedRoute) FromDatabase(p *ClosedRoute) error {
-	for _, r := range p.RoutePoints {
-		av := ApiVector{}
-		av.FromDatabase(r)
-		ar.Locations = append(ar.Locations, av)
-	}
-	ar.Name = p.Name
-	return nil
-}
-
-func (ar *ApiClosedRoute) ToDatabase() (*ClosedRoute, error) {
-	r := &ClosedRoute{}
-	for _, loc := range ar.Locations {
-		v, err := loc.ToDatabase()
-		if err != nil {
-			return nil, err
-		}
-		r.RoutePoints = append(r.RoutePoints, v)
-	}
-	r.Name = ar.Name
-	return r, nil
-}
-
-func (av *ApiVector) FromDatabase(p *Vector) error {
-	av.X = p.X
-	av.Y = p.Y
-	av.Angle = p.Angle
-	av.Speed = p.Speed
-	return nil
-}
-
-func (p *ApiVector) ToDatabase() (*Vector, error) {
-	av := &Vector{}
-	av.X = p.X
-	av.Y = p.Y
-	av.Angle = p.Angle
-	av.Speed = p.Speed
-	return av, nil
-}
-
-func (alog *ApiShuttleLog) FromDatabase(log *ShuttleLog) error {
-	alog.VehicleID = log.VehicleID
-	alog.Status = log.Status
-	av := ApiVector{}
-	av.FromDatabase(log.Location)
-	alog.Location = av
-	return nil
-}
 
 func handleLog(ctx *Context) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +38,7 @@ func handleLog(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			if handleErr(w, err) {
 				return
 			}
-			measureTime(start, "Get Shuttle log")
+			pkg.MeasureTime(start, "Get Shuttle log")
 		}
 	}
 }
@@ -151,7 +65,7 @@ func handleRoute(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			if handleErr(w, err) {
 				return
 			}
-			measureTime(start, "Get Route")
+			pkg.MeasureTime(start, "Get Route")
 			break
 		case "POST":
 			decoder := json.NewDecoder(r.Body)
@@ -172,7 +86,7 @@ func handleRoute(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			if handleErr(w, err) {
 				return
 			}
-			measureTime(start, "POST Route")
+			pkg.MeasureTime(start, "POST Route")
 			break
 		default:
 			handleErr(w, fmt.Errorf("%s Method not supported", r.Method))

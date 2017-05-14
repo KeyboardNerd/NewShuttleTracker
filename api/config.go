@@ -1,4 +1,4 @@
-package YAST
+package api
 
 import (
 	"encoding/json"

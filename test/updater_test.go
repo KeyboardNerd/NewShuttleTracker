@@ -1,4 +1,4 @@
-package YAST
+package test
 
 import (
 	"os"

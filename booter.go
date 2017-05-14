@@ -1,8 +1,13 @@
-package YAST
+package yast
 
-func Boot(config *Config) {
+import (
+	"github.com/keyboardnerd/yastserver/api"
+	"github.com/keyboardnerd/yastserver/database"
+)
+
+func Boot(config *api.Config) {
 	// connect to database
-	database := &PgSQL{Url: config.DbSrc}
+	database := &database.PgSQL{Url: config.DbSrc}
 	database.Open()
 	defer database.Close()
 	// initialize
@@ -11,6 +16,6 @@ func Boot(config *Config) {
 	// run updater async
 	go updater.RunUpdate()
 	// run api server
-	ctx := &Context{database}
-	Run(ctx, config)
+	ctx := &api.Context{database}
+	api.Run(ctx, config)
 }

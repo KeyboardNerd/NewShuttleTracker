@@ -1,4 +1,4 @@
-package YAST
+package database
 
 import (
 	"database/sql"
@@ -17,107 +17,6 @@ type PgSQL struct {
 	CachedRoute     map[string]*ClosedRoute // route id -> closed route
 }
 
-var migrations = []migrate.Migration{
-	{
-		ID: 1,
-		Up: migrate.Queries([]string{
-			// map point
-			`CREATE TABLE IF NOT EXISTS map_point(
-					id SERIAL PRIMARY KEY,
-					longitude FLOAT,
-					latitude FLOAT,
-					angle FLOAT,
-					speed FLOAT
-				)`,
-			// route
-			`CREATE TABLE IF NOT EXISTS route(
-					id SERIAL PRIMARY KEY,
-					name VARCHAR(64) UNIQUE NOT NULL,
-					CONSTRAINT name CHECK(char_length(name) > 0)
-				)`,
-			`CREATE INDEX ON route(name)`,
-			// path of a route
-			`CREATE TABLE IF NOT EXISTS route_path(
-					id SERIAL PRIMARY KEY,
-					route_id INT REFERENCES route(id) ON DELETE CASCADE,
-					map_point_id INT REFERENCES map_point(id) ON DELETE CASCADE,
-					ordering INT
-				)`,
-			`CREATE INDEX ON route_path(route_id)`,
-			// shuttle meta data
-			`CREATE TABLE IF NOT EXISTS shuttle_meta(
-					id SERIAL PRIMARY KEY,
-					remote_shuttle_id VARCHAR(64) UNIQUE NOT NULL,
-					CONSTRAINT remote_shuttle_id CHECK(char_length(remote_shuttle_id) > 0),
-					shuttle_name VARCHAR(64), 
-					shuttle_route_id INT NULL REFERENCES route(id) ON DELETE SET NULL
-				)`,
-			// shuttle logs
-			`CREATE TABLE IF NOT EXISTS shuttle_log(
-					id SERIAL PRIMARY KEY,
-					map_point_id INT REFERENCES map_point(id) ON DELETE CASCADE,
-					shuttle_meta_id INT NULL REFERENCES shuttle_meta(id) ON DELETE SET NULL,
-					status VARCHAR(64),
-					created_at TIMESTAMP WITH TIME ZONE
-				)`,
-			// stop meta data
-			`CREATE TABLE IF NOT EXISTS stop_meta(
-					id SERIAL PRIMARY KEY,
-					stop_name VARCHAR(64)
-				)`,
-			// stops
-			`CREATE TABLE IF NOT EXISTS stop(
-					id SERIAL PRIMARY KEY,
-					route_id INT REFERENCES route(id) ON DELETE CASCADE,
-					map_point_id INT REFERENCES map_point(id) ON DELETE CASCADE,
-					stop_meta_id INT NULL REFERENCES stop_meta(id) ON DELETE SET NULL
-				)`,
-			`CREATE INDEX ON stop(route_id)`,
-		}),
-		Down: migrate.Queries([]string{
-			`DROP TABLE IF EXISTS shuttle_log, shuttle_meta, route, route_path, stop, stop_meta, map_point`,
-		}),
-	},
-}
-
-const (
-	insertMapPoint = `INSERT INTO map_point (longitude, latitude, angle, speed) VALUES ($1, $2, $3, $4) RETURNING id`
-	// select or insert the shuttle's meta data if the shuttle is not found
-	soiShuttleMeta = `WITH new_shuttle_meta AS ( 
-							INSERT INTO shuttle_meta (remote_shuttle_id, shuttle_name) 
-							SELECT CAST($1 AS VARCHAR), CAST($2 AS VARCHAR) 
-							WHERE NOT EXISTS (SELECT remote_shuttle_id FROM shuttle_meta WHERE remote_shuttle_id=$1)
-							RETURNING id)
-						SELECT id FROM shuttle_meta WHERE remote_shuttle_id = $1
-						UNION
-						SELECT id FROM new_shuttle_meta`
-	insertShuttleLog = `INSERT INTO shuttle_log (map_point_id, shuttle_meta_id, created_at) VALUES($1, $2, CURRENT_TIMESTAMP)`
-	selectShuttleLog = ` 
-					SELECT shuttle_log.id, shuttle_name, status, created_at, longitude, latitude, angle, speed
-						FROM shuttle_log 
-							LEFT JOIN shuttle_meta ON shuttle_log.shuttle_meta_id = shuttle_meta.id
-							LEFT JOIN map_point ON shuttle_log.map_point_id = map_point.id
-                     WHERE shuttle_meta.remote_shuttle_id = $1
-						`
-	insertRoutePath = `
-		INSERT INTO route_path (route_id, map_point_id, ordering) VALUES ($1, $2, $3)
-	`
-	insertRouteInstance = `
-		INSERT INTO route (name) VALUES ($1) RETURNING id
-	`
-	selectRoute = `
-		SELECT route.id, longitude, latitude, angle, speed
-		FROM map_point
-		JOIN route_path ON route_path.map_point_id = map_point.id
-		JOIN route ON route.id = route_path.route_id
-		WHERE route.name = $1
-		ORDER BY route_path.ordering
-	`
-	selectRouteMeta = `
-		SELECT id, route_name FROM route WHERE name = $1
-	`
-)
-
 // Open the database connection and initialize caches
 func (pg *PgSQL) Open() {
 	db, err := sql.Open("postgres", pg.Url)
@@ -133,6 +32,29 @@ func (pg *PgSQL) Open() {
 	fmt.Printf("Finished database migration\n")
 	pg.CachedLatestLog = make(map[string]*ShuttleLog)
 	pg.CachedRoute = make(map[string]*ClosedRoute)
+}
+
+// ListClosedRouteName gives a list of route names
+func (pg *PgSQL) ListClosedRouteName() ([]string, error) {
+	tx, err := pg.DB.Begin()
+	defer tx.Commit()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(selectAllRouteName)
+	if err != nil {
+		return nil, err
+	}
+	r := []string{}
+	for rows.Next() {
+		var s string
+		err = rows.Scan(&s)
+		if err != nil {
+			return nil, err
+		}
+		r = append(r, s)
+	}
+	return r, nil
 }
 
 // InsertClosedRoute inserts route into database and return the route with database ID and error
@@ -179,6 +101,12 @@ func (pg *PgSQL) SelectClosedRoute(routeName string) (*ClosedRoute, error) {
 	}
 	defer tx.Commit()
 	vectors := []*Vector{}
+	route := &ClosedRoute{Name: routeName}
+	// check if that actually exists
+	err = tx.QueryRow(selectRouteMeta, routeName).Scan(&route.ID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(selectRoute, routeName)
 	if err != nil {
 		return nil, err
@@ -192,8 +120,7 @@ func (pg *PgSQL) SelectClosedRoute(routeName string) (*ClosedRoute, error) {
 		}
 		vectors = append(vectors, v)
 	}
-	route := &ClosedRoute{RoutePoints: vectors, Name: routeName}
-	tx.QueryRow(selectRouteMeta, routeName).Scan(&route.Name)
+	route.RoutePoints = vectors
 	pg.CachedRoute[routeName] = route
 	return route, nil
 }

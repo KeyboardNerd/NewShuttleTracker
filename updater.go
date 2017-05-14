@@ -1,4 +1,4 @@
-package YAST
+package yast
 
 import (
 	"fmt"
@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/keyboardnerd/yastserver/database"
+	"github.com/keyboardnerd/yastserver/pkg"
 )
 
 var (
@@ -16,7 +19,7 @@ var (
 
 type Updater struct {
 	Fetcher  Fetcher
-	Database Database
+	Database database.Database
 	Interval int
 }
 
@@ -40,7 +43,7 @@ func (updater *Updater) update(now time.Time) {
 		fmt.Printf("%v : %s", now, err.Error())
 	} else {
 		for _, log := range shuttleLog {
-			func(x ShuttleLog) {
+			func(x database.ShuttleLog) {
 				err := updater.Database.InsertShuttleLog(&x)
 				if err != nil {
 					fmt.Printf("Unable to insert shuttle log to database %s\n", err.Error())
@@ -48,11 +51,11 @@ func (updater *Updater) update(now time.Time) {
 			}(log)
 		}
 	}
-	measureTime(start, fmt.Sprintf("database transaction, updated %d shuttles", len(shuttleLog)))
+	pkg.MeasureTime(start, fmt.Sprintf("database transaction, updated %d shuttles", len(shuttleLog)))
 }
 
 // Pull the data from upper stream, this is a blocking call
-func (fetcher *Fetcher) Pull() ([]ShuttleLog, error) {
+func (fetcher *Fetcher) Pull() ([]database.ShuttleLog, error) {
 	// simple monitoring ( change to prometheus later )
 	start := time.Now()
 	// download the data from fetcher
@@ -70,23 +73,23 @@ func (fetcher *Fetcher) Pull() ([]ShuttleLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	measureTime(start, "Pull remote shuttle log")
+	pkg.MeasureTime(start, "Pull remote shuttle log")
 	return log, err
 }
 
-func ParseShuttleLog(logslice []byte) ([]ShuttleLog, error) {
+func ParseShuttleLog(logslice []byte) ([]database.ShuttleLog, error) {
 	var err error
 	logVehicles := logregex.FindAllStringSubmatch(string(logslice), -1)
 	if logVehicles == nil {
 		err = fmt.Errorf("Failed to parse the response %s", logslice)
 		return nil, err
 	}
-	rgshuttleLog := make([]ShuttleLog, len(logVehicles))
+	rgshuttleLog := make([]database.ShuttleLog, len(logVehicles))
 	for i, logVehicle := range logVehicles {
 		// skip first one because it's the whole matched string
-		log := ShuttleLog{}
+		log := database.ShuttleLog{}
 		log.VehicleID = logVehicle[1]
-		v := Vector{}
+		v := database.Vector{}
 		v.X, err = strconv.ParseFloat(logVehicle[2], 10)
 		if err != nil {
 			return nil, err
