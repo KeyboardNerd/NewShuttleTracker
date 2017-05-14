@@ -54,11 +54,7 @@ type ClosedRoute struct {
 	Model
 
 	RoutePoints []*Vector
-	// Start and End vectors should be a reference to vectors in RoutePoints
-	Start int
-	End   int
-
-	Name string
+	Name        string
 }
 
 // Stop represents a vector on a route
@@ -67,5 +63,6 @@ type Stop struct {
 
 	Location *Vector
 	Route    *ClosedRoute
+	StopID   string
 	Name     string
 }

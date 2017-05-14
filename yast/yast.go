@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/keyboardnerd/YAST"
+	"github.com/keyboardnerd/yastserver"
 )
 
 func main() {

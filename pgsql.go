@@ -8,10 +8,13 @@ import (
 	"github.com/remind101/migrate"
 )
 
+// PgSQL postgresql database implementation of Database Interface
+// using cache for quick response to API request
 type PgSQL struct {
 	Url             string
 	DB              *sql.DB
-	CachedLatestLog map[string]*ShuttleLog
+	CachedLatestLog map[string]*ShuttleLog  // vehicle id -> shuttle log
+	CachedRoute     map[string]*ClosedRoute // route id -> closed route
 }
 
 var migrations = []migrate.Migration{
@@ -26,16 +29,13 @@ var migrations = []migrate.Migration{
 					angle FLOAT,
 					speed FLOAT
 				)`,
-			// route meta data
-			`CREATE TABLE IF NOT EXISTS route_meta(
-					id SERIAL PRIMARY KEY,
-					route_name VARCHAR(64) NULL UNIQUE
-				)`,
 			// route
 			`CREATE TABLE IF NOT EXISTS route(
 					id SERIAL PRIMARY KEY,
-					route_meta_id INT NULL REFERENCES route_meta(id) ON DELETE SET NULL
+					name VARCHAR(64) UNIQUE NOT NULL,
+					CONSTRAINT name CHECK(char_length(name) > 0)
 				)`,
+			`CREATE INDEX ON route(name)`,
 			// path of a route
 			`CREATE TABLE IF NOT EXISTS route_path(
 					id SERIAL PRIMARY KEY,
@@ -47,7 +47,8 @@ var migrations = []migrate.Migration{
 			// shuttle meta data
 			`CREATE TABLE IF NOT EXISTS shuttle_meta(
 					id SERIAL PRIMARY KEY,
-					remote_shuttle_id VARCHAR(64) UNIQUE,
+					remote_shuttle_id VARCHAR(64) UNIQUE NOT NULL,
+					CONSTRAINT remote_shuttle_id CHECK(char_length(remote_shuttle_id) > 0),
 					shuttle_name VARCHAR(64), 
 					shuttle_route_id INT NULL REFERENCES route(id) ON DELETE SET NULL
 				)`,
@@ -69,12 +70,12 @@ var migrations = []migrate.Migration{
 					id SERIAL PRIMARY KEY,
 					route_id INT REFERENCES route(id) ON DELETE CASCADE,
 					map_point_id INT REFERENCES map_point(id) ON DELETE CASCADE,
-					stop_meta INT NULL REFERENCES route_meta(id) ON DELETE SET NULL
+					stop_meta_id INT NULL REFERENCES stop_meta(id) ON DELETE SET NULL
 				)`,
 			`CREATE INDEX ON stop(route_id)`,
 		}),
 		Down: migrate.Queries([]string{
-			`DROP TABLE IF EXISTS shuttle_log, shuttle_meta, route, route_path, route_meta, stop, stop_meta, map_point;`,
+			`DROP TABLE IF EXISTS shuttle_log, shuttle_meta, route, route_path, stop, stop_meta, map_point`,
 		}),
 	},
 }
@@ -98,27 +99,103 @@ const (
 							LEFT JOIN map_point ON shuttle_log.map_point_id = map_point.id
                      WHERE shuttle_meta.remote_shuttle_id = $1
 						`
+	insertRoutePath = `
+		INSERT INTO route_path (route_id, map_point_id, ordering) VALUES ($1, $2, $3)
+	`
+	insertRouteInstance = `
+		INSERT INTO route (name) VALUES ($1) RETURNING id
+	`
+	selectRoute = `
+		SELECT route.id, longitude, latitude, angle, speed
+		FROM map_point
+		JOIN route_path ON route_path.map_point_id = map_point.id
+		JOIN route ON route.id = route_path.route_id
+		WHERE route.name = $1
+		ORDER BY route_path.ordering
+	`
+	selectRouteMeta = `
+		SELECT id, route_name FROM route WHERE name = $1
+	`
 )
 
+// Open the database connection and initialize caches
 func (pg *PgSQL) Open() {
 	db, err := sql.Open("postgres", pg.Url)
 	if err != nil {
 		panic("Failed to connect to database")
 	}
 	pg.DB = db
+	fmt.Printf("Started database migration\n")
 	err = migrate.Exec(db, migrate.Up, migrations...)
 	if err != nil {
-		panic("Data migration failed")
+		panic("Data migration failed\n")
 	}
+	fmt.Printf("Finished database migration\n")
 	pg.CachedLatestLog = make(map[string]*ShuttleLog)
+	pg.CachedRoute = make(map[string]*ClosedRoute)
 }
 
+// InsertClosedRoute inserts route into database and return the route with database ID and error
 func (pg *PgSQL) InsertClosedRoute(route *ClosedRoute) error {
-	panic("shit")
+	tx, err := pg.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Commit()
+	// insert route meta data
+	err = tx.QueryRow(insertRouteInstance, route.Name).Scan(&route.ID)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// insert the map points
+	for i, v := range route.RoutePoints {
+		err = tx.QueryRow(insertMapPoint, v.X, v.Y, v.Angle, v.Speed).Scan(&v.ID)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		// insert the path point
+		_, err = tx.Exec(insertRoutePath, route.ID, v.ID, i)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return nil
 }
 
-func (pg *PgSQL) SelectClosedRoute(routeId string) (*ClosedRoute, error) {
-	panic("shit")
+// SelectClosedRoute selects route by its external routeName from cache first, if it's missing, select from the database
+func (pg *PgSQL) SelectClosedRoute(routeName string) (*ClosedRoute, error) {
+	// if a shuttle id is missing in the cache, then query the database
+	if r, ok := pg.CachedRoute[routeName]; ok {
+		return r, nil
+	}
+	// query database
+	tx, err := pg.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Commit()
+	vectors := []*Vector{}
+	rows, err := tx.Query(selectRoute, routeName)
+	if err != nil {
+		return nil, err
+	}
+	var internalID int
+	for rows.Next() {
+		v := &Vector{}
+		err = rows.Scan(&internalID, &v.X, &v.Y, &v.Angle, &v.Speed)
+		if err != nil {
+			return nil, err
+		}
+		vectors = append(vectors, v)
+	}
+	route := &ClosedRoute{RoutePoints: vectors, Name: routeName}
+	tx.QueryRow(selectRouteMeta, routeName).Scan(&route.Name)
+	pg.CachedRoute[routeName] = route
+	return route, nil
 }
 
 func (pg *PgSQL) InsertStop(stop *Stop) error {
@@ -133,6 +210,7 @@ func (pg *PgSQL) SelectStopOnRoute(stopId string) ([]*Stop, error) {
 	panic("shit")
 }
 
+// InsertShuttleLog to database
 func (pg *PgSQL) InsertShuttleLog(log *ShuttleLog) error {
 	tx, err := pg.DB.Begin()
 
@@ -143,7 +221,6 @@ func (pg *PgSQL) InsertShuttleLog(log *ShuttleLog) error {
 	err = tx.QueryRow(insertMapPoint, log.Location.X, log.Location.Y, log.Location.Angle, log.Location.Speed).Scan(&log.Location.ID)
 	if err != nil {
 		tx.Rollback()
-		panic(err)
 		return err
 	}
 	var (
@@ -153,30 +230,26 @@ func (pg *PgSQL) InsertShuttleLog(log *ShuttleLog) error {
 	err = shuttleName.Scan(log.Name)
 	if err != nil {
 		tx.Rollback()
-		panic(err)
 		return err
 	}
 	err = tx.QueryRow(soiShuttleMeta, log.VehicleID, shuttleName).Scan(&shuttle_meta_id)
-	fmt.Println(log.VehicleID)
-	fmt.Println(shuttleName)
 	if err != nil {
 		tx.Rollback()
-		panic(err)
 		return err
 	}
 
 	_, err = tx.Exec(insertShuttleLog, log.Location.ID, shuttle_meta_id)
 	if err != nil {
 		tx.Rollback()
-		fmt.Println(shuttle_meta_id)
-		panic(err)
 		return err
 	}
 	pg.CachedLatestLog[log.VehicleID] = log
 	return nil
 }
 
-func (pg *PgSQL) SelectLog(logid string) (*ShuttleLog, error) {
+// SelectShuttleLog selects all shuttle logs of a shuttle specified by its remote id
+func (pg *PgSQL) SelectShuttleLog(remoteShuttleID string) ([]*ShuttleLog, error) {
+	var logs []*ShuttleLog
 	v := &Vector{}
 	s := &ShuttleLog{Location: v}
 	tx, err := pg.DB.Begin()
@@ -185,31 +258,38 @@ func (pg *PgSQL) SelectLog(logid string) (*ShuttleLog, error) {
 		return nil, err
 	}
 	defer tx.Commit()
-	name := sql.NullString{}
-	status := sql.NullString{}
-	err = tx.QueryRow(selectShuttleLog, logid).Scan(&s.ID, &name, &status, &s.CreatedAt, &v.X, &v.Y, &v.Angle, &v.Speed)
-	if name.Valid {
-		s.Name = name.String
-	}
-	if status.Valid {
-		s.Status = status.String
-	}
+
+	rows, err := tx.Query(selectShuttleLog, remoteShuttleID)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Select Latest Log %v")
-	return s, nil
+	for rows.Next() {
+		name := sql.NullString{}
+		status := sql.NullString{}
+		rows.Scan(&s.ID, &name, &status, &s.CreatedAt, &v.X, &v.Y, &v.Angle, &v.Speed)
+		if name.Valid {
+			s.Name = name.String
+		}
+		if status.Valid {
+			s.Status = status.String
+		}
+		logs = append(logs, s)
+	}
+	return logs, nil
 }
 
+// SelectLatestLog fetches the latest shuttle's log from database
 func (pg *PgSQL) SelectLatestLog(logid string) (*ShuttleLog, error) {
-	// TODO: initial value should be the latest one in database
 	if v, ok := pg.CachedLatestLog[logid]; ok {
 		return v, nil
 	}
-	return nil, fmt.Errorf("Shuttle Log with Vehicle ID '%s' not found", logid)
+	// query database if not in cache ( lazy load requires a special table to store the latest time stamp )
+	return nil, fmt.Errorf("Shuttle Log with Vehicle ID '%s' not found in cache", logid)
 }
 
+// Close connection to database and clean caches
 func (pg *PgSQL) Close() {
 	pg.DB.Close()
 	pg.CachedLatestLog = nil
+	pg.CachedRoute = nil
 }

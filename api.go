@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
+	"time"
 )
 
 const (
@@ -42,8 +42,7 @@ type ApiClosedRoute struct {
 	ResStat
 
 	Locations []ApiVector `json:"location"`
-	Start     int         `json:"start"`
-	End       int         `json:"end"`
+	Name      string      `json:"name"`
 }
 
 func Stat(status, information string) []byte {
@@ -60,7 +59,21 @@ func (ar *ApiClosedRoute) FromDatabase(p *ClosedRoute) error {
 		av.FromDatabase(r)
 		ar.Locations = append(ar.Locations, av)
 	}
+	ar.Name = p.Name
 	return nil
+}
+
+func (ar *ApiClosedRoute) ToDatabase() (*ClosedRoute, error) {
+	r := &ClosedRoute{}
+	for _, loc := range ar.Locations {
+		v, err := loc.ToDatabase()
+		if err != nil {
+			return nil, err
+		}
+		r.RoutePoints = append(r.RoutePoints, v)
+	}
+	r.Name = ar.Name
+	return r, nil
 }
 
 func (av *ApiVector) FromDatabase(p *Vector) error {
@@ -69,6 +82,15 @@ func (av *ApiVector) FromDatabase(p *Vector) error {
 	av.Angle = p.Angle
 	av.Speed = p.Speed
 	return nil
+}
+
+func (p *ApiVector) ToDatabase() (*Vector, error) {
+	av := &Vector{}
+	av.X = p.X
+	av.Y = p.Y
+	av.Angle = p.Angle
+	av.Speed = p.Speed
+	return av, nil
 }
 
 func (alog *ApiShuttleLog) FromDatabase(log *ShuttleLog) error {
@@ -82,6 +104,7 @@ func (alog *ApiShuttleLog) FromDatabase(log *ShuttleLog) error {
 
 func handleLog(ctx *Context) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		switch r.Method {
 		case "GET":
 			id, err := getID(r, "id")
@@ -101,15 +124,17 @@ func handleLog(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			if handleErr(w, err) {
 				return
 			}
+			measureTime(start, "Get Shuttle log")
 		}
 	}
 }
 
 func handleRoute(ctx *Context) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		switch r.Method {
 		case "GET":
-			id, err := getID(r, "id")
+			id, err := getID(r, "name")
 			if handleErr(w, err) {
 				return
 			}
@@ -126,17 +151,45 @@ func handleRoute(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			if handleErr(w, err) {
 				return
 			}
+			measureTime(start, "Get Route")
+			break
+		case "POST":
+			decoder := json.NewDecoder(r.Body)
+			route := &ApiClosedRoute{}
+			err := decoder.Decode(route)
+			if handleErr(w, err) {
+				return
+			}
+			dbRoute, err := route.ToDatabase()
+			if handleErr(w, err) {
+				return
+			}
+			err = ctx.DB.InsertClosedRoute(dbRoute)
+			if handleErr(w, err) {
+				return
+			}
+			err = sendResponse(w, dbRoute)
+			if handleErr(w, err) {
+				return
+			}
+			measureTime(start, "POST Route")
+			break
+		default:
+			handleErr(w, fmt.Errorf("%s Method not supported", r.Method))
 		}
-
 	}
 }
 
-func handleErr(w http.ResponseWriter, err error) bool {
+func handleErrWithInfo(w http.ResponseWriter, err error, info string) bool {
 	if err != nil {
-		w.Write(Stat(ERROR, err.Error()))
+		w.Write(Stat(ERROR, err.Error()+info))
 		return true
 	}
 	return false
+}
+
+func handleErr(w http.ResponseWriter, err error) bool {
+	return handleErrWithInfo(w, err, "")
 }
 
 func getID(r *http.Request, id string) (string, error) {
@@ -145,11 +198,12 @@ func getID(r *http.Request, id string) (string, error) {
 	if str == "" {
 		return "", errors.New("Invalid ID")
 	}
-	_, err := strconv.ParseInt(str, 10, 0)
-	if err != nil {
-		return "", errors.New("Invalid ID")
-	}
 	return str, nil
+}
+
+func validateToken(r *http.Request, token string) bool {
+	// security feature to validate the token when posting
+	return true
 }
 
 func sendResponse(w http.ResponseWriter, obj interface{}) error {

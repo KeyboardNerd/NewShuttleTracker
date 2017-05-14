@@ -9,10 +9,19 @@ import (
 	"time"
 )
 
+var (
+	logregex = regexp.MustCompile(
+		`Vehicle ID:(\d+) lat:(-?\d+.\d+) lon:(-?\d+.\d+) dir:(\d+.\d+) spd:(\d+.\d+) lck:(\d+) time:(\d+) date:(\d+) trig:(\d+) eof`)
+)
+
 type Updater struct {
 	Fetcher  Fetcher
 	Database Database
 	Interval int
+}
+
+type Fetcher struct {
+	RemoteSite string
 }
 
 func (updater *Updater) RunUpdate() {
@@ -24,30 +33,22 @@ func (updater *Updater) RunUpdate() {
 }
 
 func (updater *Updater) update(now time.Time) {
-	fmt.Printf("Start Pulling Update at %v\n", time.Now())
 	shuttleLog, err := updater.Fetcher.Pull()
 	start := time.Now()
 	if err != nil {
 		// log error
 		fmt.Printf("%v : %s", now, err.Error())
 	} else {
-		// insert into database in parallel
 		for _, log := range shuttleLog {
 			func(x ShuttleLog) {
 				err := updater.Database.InsertShuttleLog(&x)
 				if err != nil {
-					fmt.Printf("Unable to insert shuttle log to database %v\n", x)
-					panic(err.Error())
-					return
+					fmt.Printf("Unable to insert shuttle log to database %s\n", err.Error())
 				}
 			}(log)
 		}
 	}
-	fmt.Printf("Database Transaction costs: %v\n", time.Since(start))
-}
-
-type Fetcher struct {
-	RemoteSite string
+	measureTime(start, fmt.Sprintf("database transaction, updated %d shuttles", len(shuttleLog)))
 }
 
 // Pull the data from upper stream, this is a blocking call
@@ -69,15 +70,9 @@ func (fetcher *Fetcher) Pull() ([]ShuttleLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	// simple logging, use logrus later
-	fmt.Printf("Pull Vehicle update costs: %v\n", time.Since(start))
+	measureTime(start, "Pull remote shuttle log")
 	return log, err
 }
-
-var (
-	logregex = regexp.MustCompile(
-		`Vehicle ID:(\d+) lat:(-?\d+.\d+) lon:(-?\d+.\d+) dir:(\d+.\d+) spd:(\d+.\d+) lck:(\d+) time:(\d+) date:(\d+) trig:(\d+) eof`)
-)
 
 func ParseShuttleLog(logslice []byte) ([]ShuttleLog, error) {
 	var err error
