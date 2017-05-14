@@ -1,0 +1,7 @@
+{
+    "remote_url": "",
+    "db_type": "postgres",
+    "db_src": "host=localhost port=5432 user=postgres sslmode=disable dbname=postgres",
+    "local_url": ":8080",
+    "updater_interval": 15
+}
