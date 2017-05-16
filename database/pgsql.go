@@ -11,7 +11,7 @@ import (
 // PgSQL postgresql database implementation of Database Interface
 // using cache for quick response to API request
 type PgSQL struct {
-	Url             string
+	URL             string
 	DB              *sql.DB
 	CachedLatestLog map[string]*ShuttleLog  // vehicle id -> shuttle log
 	CachedRoute     map[string]*ClosedRoute // route id -> closed route
@@ -19,7 +19,7 @@ type PgSQL struct {
 
 // Open the database connection and initialize caches
 func (pg *PgSQL) Open() {
-	db, err := sql.Open("postgres", pg.Url)
+	db, err := sql.Open("postgres", pg.URL)
 	if err != nil {
 		panic("Failed to connect to database")
 	}

@@ -7,7 +7,7 @@ import (
 
 func Boot(config *api.Config) {
 	// connect to database
-	database := &database.PgSQL{Url: config.DbSrc}
+	database := &database.PgSQL{URL: config.DbSrc}
 	database.Open()
 	defer database.Close()
 	// initialize
