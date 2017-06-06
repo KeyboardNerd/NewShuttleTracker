@@ -6,6 +6,9 @@ import (
 
 	yast "github.com/keyboardnerd/yastserver"
 	"github.com/keyboardnerd/yastserver/api"
+
+	// bootstrap
+	_ "github.com/lib/pq"
 )
 
 func main() {

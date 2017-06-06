@@ -10,9 +10,9 @@ type Database interface {
 	// return the latest log of a shuttle by shuttle name
 	SelectLatestLog(string) (*ShuttleLog, error)
 	// Insert a closed route to database
-	InsertClosedRoute(*ClosedRoute) error
+	InsertRoute(*Route) error
 	// Select a closed route to database by route name
-	SelectClosedRoute(string) (*ClosedRoute, error)
+	SelectRoute(string) (*Route, error)
 	// Insert a stop to database
 	InsertStop(*Stop) error
 	// Select a stop from database by stop name
@@ -27,13 +27,20 @@ type Model struct {
 	ID int64
 }
 
-type Vector struct {
+type MapPoint struct {
 	Model
 
 	X     float64
 	Y     float64
 	Angle float64
 	Speed float64
+}
+
+type Shuttle struct {
+	Model
+
+	Name       string
+	RemoteName string
 }
 
 // ShuttleLog stores the logging information of the shuttle
@@ -43,17 +50,17 @@ type ShuttleLog struct {
 
 	VehicleID string
 	Status    string
-	Location  *Vector
+	Location  *MapPoint
 	Name      string
 	CreatedAt time.Time
 }
 
-// ClosedRoute contains a list of vectors in the database with well defined ordering
-// ClosedRoute should be a closed loop with start
-type ClosedRoute struct {
+// Route contains a list of vectors in the database with well defined ordering
+// Route should be a closed loop with start
+type Route struct {
 	Model
 
-	RoutePoints []*Vector
+	RoutePoints []*MapPoint
 	Name        string
 }
 
@@ -61,8 +68,8 @@ type ClosedRoute struct {
 type Stop struct {
 	Model
 
-	Location *Vector
-	Route    *ClosedRoute
+	Location *MapPoint
+	Route    *Route
 	StopID   string
 	Name     string
 }

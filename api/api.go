@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/keyboardnerd/yastserver/pkg"
 )
 
@@ -16,30 +17,57 @@ const (
 	OK    = "ok"
 )
 
-func handleLog(ctx *Context) func(http.ResponseWriter, *http.Request) {
+func handleList(ctx *Context) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		switch r.Method {
 		case "GET":
-			id, err := getID(r, "id")
-			if handleErr(w, err) {
-				return
+			q := r.URL.Query()
+			switch q.Get("category") {
+			case "shuttle":
+				break
+			case "stop":
+				break
+			case "route":
+				break
+			default:
+				handleErr(w, fmt.Errorf("invalid category"))
 			}
-			res, err := ctx.DB.SelectLatestLog(id)
-			if handleErr(w, err) {
-				return
-			}
-			ar := &ApiShuttleLog{}
-			err = ar.FromDatabase(res)
-			if handleErr(w, err) {
-				return
-			}
-			err = sendResponse(w, ar)
-			if handleErr(w, err) {
-				return
-			}
-			pkg.MeasureTime(start, "Get Shuttle log")
 		}
+	}
+}
+
+func handleHTTP(route string, f handleFunc) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		statusCode, err := f(w, r)
+		pkg.MeasureTime(start, route)
+		if handleErr(w, err) {
+			return
+		}
+	}
+}
+func (s *srvContext) getLatestShuttleLog(w http.ResponseWriter, r *http.Request) (int, error) {
+	start := time.Now()
+	id, err := getID(r, "id")
+	if err != nil {
+		http.Status
+	}
+	if handleErr(w, err) {
+		return
+	}
+	res, err := ctx.DB.SelectLatestLog(id)
+	if handleErr(w, err) {
+		return
+	}
+	ar := &ApiShuttleLog{}
+	err = ar.FromDatabase(res)
+	if handleErr(w, err) {
+		return
+	}
+	err = sendResponse(w, ar)
+	if handleErr(w, err) {
+		return
 	}
 }
 
@@ -52,11 +80,11 @@ func handleRoute(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			if handleErr(w, err) {
 				return
 			}
-			res, err := ctx.DB.SelectClosedRoute(id)
+			res, err := ctx.DB.SelectRoute(id)
 			if handleErr(w, err) {
 				return
 			}
-			ar := &ApiClosedRoute{}
+			ar := &ApiRoute{}
 			err = ar.FromDatabase(res)
 			if handleErr(w, err) {
 				return
@@ -69,7 +97,7 @@ func handleRoute(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			break
 		case "POST":
 			decoder := json.NewDecoder(r.Body)
-			route := &ApiClosedRoute{}
+			route := &ApiRoute{}
 			err := decoder.Decode(route)
 			if handleErr(w, err) {
 				return
@@ -78,7 +106,7 @@ func handleRoute(ctx *Context) func(http.ResponseWriter, *http.Request) {
 			if handleErr(w, err) {
 				return
 			}
-			err = ctx.DB.InsertClosedRoute(dbRoute)
+			err = ctx.DB.InsertRoute(dbRoute)
 			if handleErr(w, err) {
 				return
 			}
@@ -130,9 +158,12 @@ func sendResponse(w http.ResponseWriter, obj interface{}) error {
 }
 
 func Run(ctx *Context, config *Config) {
-	fmt.Println("Running Shuttle server\n")
+	log.Println("Running Shuttle server")
+	r := mux.NewRouter()
+	r.HandleFunc("/shuttle/{id}").Methods("GET")
 	// initialize router
 	http.HandleFunc("/v1/shuttle", handleLog(ctx))
+	http.HandleFunc("/v1/list", handleList(ctx))
 	http.HandleFunc("/v1/route", handleRoute(ctx))
 	log.Fatal(http.ListenAndServe(config.LocalURL, nil))
 

@@ -12,7 +12,7 @@ type MockDatabase struct {
 
 	LogTabel    []ShuttleLog           // ( mock main database table)
 	LatestTabel map[string]*ShuttleLog // contains reference to logtabel ( mock foreign key )
-	RouteTabel  map[string]*ClosedRoute
+	RouteTabel  map[string]*Route
 	RouteID     int
 }
 
@@ -44,7 +44,7 @@ func (db *MockDatabase) SelectLatestLog(vid string) (*ShuttleLog, error) {
 	return nil, fmt.Errorf("vehicle key (%s) not found in database\n", vid)
 }
 
-func (db *MockDatabase) InsertClosedRoute(route *ClosedRoute) error {
+func (db *MockDatabase) InsertRoute(route *Route) error {
 	db.Lock()
 	defer db.Unlock()
 	db.RouteTabel[string(db.RouteID)] = route
@@ -52,7 +52,7 @@ func (db *MockDatabase) InsertClosedRoute(route *ClosedRoute) error {
 	return nil
 }
 
-func (db *MockDatabase) SelectClosedRoute(rid string) (*ClosedRoute, error) {
+func (db *MockDatabase) SelectRoute(rid string) (*Route, error) {
 	db.Lock()
 	defer db.Unlock()
 	if v, ok := db.RouteTabel[rid]; ok {

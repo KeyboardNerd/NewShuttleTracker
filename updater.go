@@ -17,16 +17,22 @@ var (
 		`Vehicle ID:(\d+) lat:(-?\d+.\d+) lon:(-?\d+.\d+) dir:(\d+.\d+) spd:(\d+.\d+) lck:(\d+) time:(\d+) date:(\d+) trig:(\d+) eof`)
 )
 
+// Updater updates the database by an interval
 type Updater struct {
-	Fetcher  Fetcher
+	// fetch the data from remote API
+	Fetcher Fetcher
+	// database
 	Database database.Database
+	// intervae of fetching the data
 	Interval int
 }
 
+// Fetcher fetches the data from remote API
 type Fetcher struct {
 	RemoteSite string
 }
 
+// RunUpdate fetches the data and insert into the database by based on some intervals
 func (updater *Updater) RunUpdate() {
 	fmt.Printf("run update... %#v\n", updater)
 	updater.update(time.Now())
@@ -77,6 +83,7 @@ func (fetcher *Fetcher) Pull() ([]database.ShuttleLog, error) {
 	return log, err
 }
 
+// ParseShuttleLog parses bytes received from the remote server and generate the database shutte log
 func ParseShuttleLog(logslice []byte) ([]database.ShuttleLog, error) {
 	var err error
 	logVehicles := logregex.FindAllStringSubmatch(string(logslice), -1)
@@ -89,7 +96,7 @@ func ParseShuttleLog(logslice []byte) ([]database.ShuttleLog, error) {
 		// skip first one because it's the whole matched string
 		log := database.ShuttleLog{}
 		log.VehicleID = logVehicle[1]
-		v := database.Vector{}
+		v := database.MapPoint{}
 		v.X, err = strconv.ParseFloat(logVehicle[2], 10)
 		if err != nil {
 			return nil, err

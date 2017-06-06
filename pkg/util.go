@@ -1,10 +1,10 @@
 package pkg
 
 import (
-	"fmt"
+	"log"
 	"time"
 )
 
 func MeasureTime(start time.Time, info string) {
-	fmt.Printf("cost %v: %s\n", time.Since(start), info)
+	log.Printf("cost %v: %s\n", time.Since(start), info)
 }

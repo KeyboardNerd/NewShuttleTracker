@@ -3,8 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 
-	_ "github.com/lib/pq"
 	"github.com/remind101/migrate"
 )
 
@@ -13,29 +13,29 @@ import (
 type PgSQL struct {
 	URL             string
 	DB              *sql.DB
-	CachedLatestLog map[string]*ShuttleLog  // vehicle id -> shuttle log
-	CachedRoute     map[string]*ClosedRoute // route id -> closed route
+	CachedLatestLog map[string]*ShuttleLog // vehicle id -> shuttle log
+	CachedRoute     map[string]*Route      // route id -> closed route
 }
 
 // Open the database connection and initialize caches
 func (pg *PgSQL) Open() {
 	db, err := sql.Open("postgres", pg.URL)
 	if err != nil {
-		panic("Failed to connect to database")
+		log.Fatalln("Failed to connect to database")
 	}
 	pg.DB = db
-	fmt.Printf("Started database migration\n")
+	log.Println("Started database migration")
 	err = migrate.Exec(db, migrate.Up, migrations...)
 	if err != nil {
-		panic("Data migration failed\n")
+		log.Fatalln("Data migration failed")
 	}
-	fmt.Printf("Finished database migration\n")
+	log.Println("Finished database migration")
 	pg.CachedLatestLog = make(map[string]*ShuttleLog)
-	pg.CachedRoute = make(map[string]*ClosedRoute)
+	pg.CachedRoute = make(map[string]*Route)
 }
 
-// ListClosedRouteName gives a list of route names
-func (pg *PgSQL) ListClosedRouteName() ([]string, error) {
+// ListRouteName gives a list of route names
+func (pg *PgSQL) ListRouteName() ([]string, error) {
 	tx, err := pg.DB.Begin()
 	defer tx.Commit()
 	if err != nil {
@@ -57,29 +57,23 @@ func (pg *PgSQL) ListClosedRouteName() ([]string, error) {
 	return r, nil
 }
 
-// InsertClosedRoute inserts route into database and return the route with database ID and error
-func (pg *PgSQL) InsertClosedRoute(route *ClosedRoute) error {
+// InsertRoute inserts route into database and return the route with database ID and error
+func (pg *PgSQL) InsertRoute(route *Route) error {
 	tx, err := pg.DB.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Commit()
 	// insert route meta data
-	err = tx.QueryRow(insertRouteInstance, route.Name).Scan(&route.ID)
+	err = tx.QueryRow(insertRoute, route.Name).Scan(&route.ID)
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
 	// insert the map points
-	for i, v := range route.RoutePoints {
-		err = tx.QueryRow(insertMapPoint, v.X, v.Y, v.Angle, v.Speed).Scan(&v.ID)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-		// insert the path point
-		_, err = tx.Exec(insertRoutePath, route.ID, v.ID, i)
+	for _, v := range route.RoutePoints {
+		err = tx.QueryRow(insertRoutePath, v.X, v.Y, v.Angle, v.Speed).Scan(&v.ID)
 		if err != nil {
 			tx.Rollback()
 			return err
@@ -88,8 +82,8 @@ func (pg *PgSQL) InsertClosedRoute(route *ClosedRoute) error {
 	return nil
 }
 
-// SelectClosedRoute selects route by its external routeName from cache first, if it's missing, select from the database
-func (pg *PgSQL) SelectClosedRoute(routeName string) (*ClosedRoute, error) {
+// SelectRoute selects route by its external routeName from cache first, if it's missing, select from the database
+func (pg *PgSQL) SelectRoute(routeName string) (*Route, error) {
 	// if a shuttle id is missing in the cache, then query the database
 	if r, ok := pg.CachedRoute[routeName]; ok {
 		return r, nil
@@ -100,20 +94,15 @@ func (pg *PgSQL) SelectClosedRoute(routeName string) (*ClosedRoute, error) {
 		return nil, err
 	}
 	defer tx.Commit()
-	vectors := []*Vector{}
-	route := &ClosedRoute{Name: routeName}
-	// check if that actually exists
-	err = tx.QueryRow(selectRouteMeta, routeName).Scan(&route.ID)
-	if err != nil {
-		return nil, err
-	}
+	vectors := []*MapPoint{}
+	route := &Route{Name: routeName}
 	rows, err := tx.Query(selectRoute, routeName)
 	if err != nil {
 		return nil, err
 	}
 	var internalID int
 	for rows.Next() {
-		v := &Vector{}
+		v := &MapPoint{}
 		err = rows.Scan(&internalID, &v.X, &v.Y, &v.Angle, &v.Speed)
 		if err != nil {
 			return nil, err
@@ -145,7 +134,7 @@ func (pg *PgSQL) InsertShuttleLog(log *ShuttleLog) error {
 		return err
 	}
 	defer tx.Commit()
-	err = tx.QueryRow(insertMapPoint, log.Location.X, log.Location.Y, log.Location.Angle, log.Location.Speed).Scan(&log.Location.ID)
+	err = tx.QueryRow(insertShuttleLog, log.Location.X, log.Location.Y, log.Location.Angle, log.Location.Speed).Scan(&log.Location.ID)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -159,7 +148,7 @@ func (pg *PgSQL) InsertShuttleLog(log *ShuttleLog) error {
 		tx.Rollback()
 		return err
 	}
-	err = tx.QueryRow(soiShuttleMeta, log.VehicleID, shuttleName).Scan(&shuttle_meta_id)
+	err = tx.QueryRow(soiShuttle, log.VehicleID, shuttleName).Scan(&shuttle_meta_id)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -177,7 +166,7 @@ func (pg *PgSQL) InsertShuttleLog(log *ShuttleLog) error {
 // SelectShuttleLog selects all shuttle logs of a shuttle specified by its remote id
 func (pg *PgSQL) SelectShuttleLog(remoteShuttleID string) ([]*ShuttleLog, error) {
 	var logs []*ShuttleLog
-	v := &Vector{}
+	v := &MapPoint{}
 	s := &ShuttleLog{Location: v}
 	tx, err := pg.DB.Begin()
 

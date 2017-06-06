@@ -1,61 +1,114 @@
 # YAST Server
 ## Yet another shuttle tracker
-A golang API server targeting to replace current implementation of Shuttle tracker server.
+A golang API server targeting to replace current implementation of Shuttle tracker server. The API is designed to be simple.
 
-## API Overview
+## Concept
+Route is a referenced way of running between each stops. 
+Shuttles are running on or not on the routes. 
 
-| Type        | Request           | Response |
-| ------------- |:-------------:| -----:|
-| Shuttle | `GET /v1/shuttle?id=<shuttle id>` | latest shuttle location log |
-| Route | `GET /v1/route?id=<route id>`      | an ordered list of map points on the map 
-| Route | `POST /v1/route`      | post a new route to the database
+## API ( to be implemented )
+### Shuttle
+#### GET /shuttle
+Options
 
-
-## API Request/Response formats
-notation: type & explanation
-
-only `_stat` and `_info` will be returned on failure
+* active : return all active shuttle's latest raw information only
 
 ~~~
-Shuttle Get response on success; 
 {
-    "_stat": string & status of the response,
-    "_info": string & additional information of the response, 
-    "id" : string & external name of the vehicle,
-    "location" : {
-        "x" : float & longitude,
-        "y" : float & latitude,
-        "angle" : float & angle in degree,
-        "speed" : float & speed in mph
-    } & location of the shuttle in log,
-    "stat" : string & status of the shuttle in log
+	"shuttles" : [
+		{
+			"name" : "deep blue",
+			"location" : {
+				"lat" : 123.3,
+				"lon" : 234.4, 
+			},
+			"stop" : {
+				"to" : {
+					"name" : "east-colonie",
+				},
+				"from" : {
+					"name" : "east-union",
+				},
+				"at" : {}
+			},
+			"heading" : 129,
+			"status" : "active",
+			"route" : "east",
+		}
+	]
 }
 ~~~
 
+
+### Route
+#### GET /route
+Options
+
+* active : return all active routes only
+
 ~~~
-Route Get/POST response
 {
-    "_stat": string & status of the response,
-    "_info": string & additional information of the response, 
-    "location" : [{
-        "x" : float & longitude,
-        "y" : float & latitude,
-        "angle" : float & angle in degree,
-        "speed" : float & speed in mph
-    }] & ordered list of locations on the route,
-    "name" : string & external name of the route
+	"routes" : [
+		{
+			"name" : "east",
+			"location" : [{"lat": 1.0, "lon": 2.0 },...],
+			"stops" : [
+				{
+					"name" : "east-colonie",
+					"location" : {
+						"lat" : 123.4,
+						"lon" : 124.5
+					},
+					"order" : 0
+				}
+			]
+			"status" : "active"
+		},...
+	]
 }
 ~~~
 
+#### POST /route
+Add a route, including all stops and a few route points to be intrapolated
+
 ~~~
-Route Post json
 {
-    "location" : [{
-        "x" : float & longitude,
-        "y" : float & latitude,
-        "angle" : float & angle in degree,
-        "speed" : float & speed in mph
-    }] & ordered list of locations on the route,
-    "name" : string & external name of the route ( should be unique )
+	"name" : "east",
+	"location" : [{"lat": 1.0, "lon": 2.0},...],
+	"closed route" : true,
+	"interpolate" : true,
+	"enabled time" : [
+		{"start time" : "dec 2",
+		 "end time" : "dec 3"
+		 },...
+	],
+	"stops" : [
+		{
+			"name" : "east-colonie",
+			"location" : {
+				"lat" : 123.4,
+				"lon" : 124.5
+			},
+			"snap to route" : true,
+			"order": 0
+		},...
+	]
+}
+~~~
+
+### ETA
+#### GET /eta/shuttle/`:shuttle name`/stop/`:stop name`
+Return ETA to that stop from this shuttle
+
+~~~
+{
+	"name" : "deep blue",
+	"stop" : {
+		"to" : {
+			"name" : "east-union",
+			"eta" : "20 min"
+		}
+	},
+	"route" : "east"
 }
 ~~~
